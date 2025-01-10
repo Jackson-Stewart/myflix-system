@@ -1,3 +1,17 @@
+name: MyFlix CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY_PREFIX: myflix
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
