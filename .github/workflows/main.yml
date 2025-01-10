@@ -1,0 +1,82 @@
+name: MyFlix CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY_PREFIX: myflix
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Build and push Docker images
+      - name: Build and Push Auth Service
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd auth-service
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-auth:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-auth:$IMAGE_TAG
+          cd ..
+
+      - name: Build and Push Video Streaming Service
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd video-streaming
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-video:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-video:$IMAGE_TAG
+          cd ..
+
+      - name: Build and Push Watchlist Service
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          cd watchlist-service
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-watchlist:$IMAGE_TAG .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY_PREFIX-watchlist:$IMAGE_TAG
+          cd ..
+
+      - name: Deploy to EC2
+        env:
+          PRIVATE_KEY: ${{ secrets.EC2_PRIVATE_KEY }}
+          HOST: ${{ secrets.EC2_HOST }}
+          USER: ec2-user
+        run: |
+          echo "$PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+          
+          # Copy docker-compose and necessary files
+          scp -i private_key.pem -o StrictHostKeyChecking=no docker-compose.yml $USER@$HOST:~/
+          
+          # SSH into instance and update services
+          ssh -i private_key.pem -o StrictHostKeyChecking=no $USER@$HOST '
+            # Pull latest images
+            docker-compose pull
+            
+            # Update services
+            docker-compose up -d
+          '
+          
+          rm -f private_key.pem
